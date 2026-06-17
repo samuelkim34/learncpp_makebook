@@ -39,21 +39,86 @@ As mentioned by the creators:
 > * Advertising revenues. See those adsense ads on the right? Every time someone clicks one, we make a few cents. It’s not much, but it’s (hopefully) enough to at least pay the hosting fees and maybe buy ourselves a Hawaiian pizza and a pint of Newcastle every once in a while\*.  
 > (\* Beer and programming don’t mix. Please code responsibly.)
 
+## Scripts
+
+Two implementations are available:
+
+| Script | Language | Status |
+|---|---|---|
+| `learncpp_makebook.py` | Python 3 | Current, actively maintained |
+| `learncpp_makebook.R` | R | Original, may be outdated |
+
+The Python port (`learncpp_makebook.py`) is the recommended version. It includes a browser-like
+User-Agent header, automatic retry logic with exponential backoff to handle slow or
+rate-limiting responses from the server, and is current with the redesigned learncpp website.
+
 ## Requirements
-The script is written in R and requires an R installation on the system, with Rscript executable on the PATH.
-See https://www.r-project.org/ for installation instructions.  
-In addition, the following 3 R packages are required: tidyverse, rvest, and tableHTML These can be installed by running ```install.packages("_package name_")``` for each of them from R.
 
-To convert html to the requested output format, pandoc needs to be installed and on the PATH. See
-https://pandoc.org/installing.html for instructions. Without pandoc, the html files will still
-be downloaded and edited, but no one-file book will be generated.
+### Python (recommended)
 
-To clone the repository from git, you need to have git installed. See https://www.atlassian.com/git/tutorials/install-git
+- **Python 3.10+**
+- The following packages (install via pip):
+  ```
+  pip install -r requirements.txt
+  ```
+- **pandoc** for the final conversion step. See https://pandoc.org/installing.html for instructions.
+  Without pandoc, the html files will still be downloaded and edited, but no single-file book will be generated.
+
+### R (original)
+
+Requires an R installation with Rscript on the PATH. See https://www.r-project.org/.  
+The following R packages are required: `tidyverse`, `rvest`, and `tableHTML`. Install each with:
+```r
+install.packages("package_name")
+```
+Also requires **pandoc** (see above).
+
+### Cloning
+
+To clone the repository, you need git installed. See https://www.atlassian.com/git/tutorials/install-git
 
 ## Usage
-Run the following commands to execute the script:
+
+### Python
+
+```bash
+git clone https://github.com/stevenmz/learncpp_makebook.git
+cd learncpp_makebook
+pip install -r requirements.txt
+python3 learncpp_makebook.py
 ```
-git clone https://github.com/martijnvanattekum/learncpp_makebook.git
+
+By default the script produces an epub3 file named `learncpp_book.epub`. Both can be overridden
+on the command line:
+
+| Argument | Description | Default |
+|---|---|---|
+| `--format FORMAT` | Output format passed to pandoc | `epub3` |
+| `--output FILENAME` | Output file name | `learncpp_book.epub` |
+
+Examples:
+
+```bash
+# Default: epub3 output
+python3 learncpp_makebook.py
+
+# PDF output
+python3 learncpp_makebook.py --format pdf --output learncpp_book.pdf
+
+# Custom epub filename
+python3 learncpp_makebook.py --output my_cpp_book.epub
+
+# Show all options
+python3 learncpp_makebook.py --help
+```
+
+The script creates two working directories (`html_raw/` and `html_edit/`) and writes the
+final book to the specified output file.
+
+### R
+
+```bash
+git clone https://github.com/stevenmz/learncpp_makebook.git
 cd learncpp_makebook
 # If needed, change the output format and file name in the script's parameters
 Rscript learncpp_makebook.R
