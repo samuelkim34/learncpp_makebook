@@ -1,0 +1,30 @@
+% Keep images within the printable area of the PDF.
+% Large screenshots are scaled down while preserving their aspect ratio.
+
+\usepackage{graphicx}
+
+\makeatletter
+
+\def\maxwidth{%
+  \ifdim\Gin@nat@width>\linewidth
+    \linewidth
+  \else
+    \Gin@nat@width
+  \fi
+}
+
+\def\maxheight{%
+  \ifdim\Gin@nat@height>0.9\textheight
+    0.9\textheight
+  \else
+    \Gin@nat@height
+  \fi
+}
+
+\setkeys{Gin}{
+  width=\maxwidth,
+  height=\maxheight,
+  keepaspectratio
+}
+
+\makeatother

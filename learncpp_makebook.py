@@ -11,8 +11,12 @@
 #                STEP3: remove all html frames that do not go into the book
 #                STEP4: combine all html files to the book
 #
-# Dependencies (install with pip):
-#   pip install requests lxml pandas
+# Python dependencies:
+#   pip install requests lxml pandas pillow
+#
+# PDF output dependencies:
+#   pandoc
+#   tectonic
 
 import argparse
 import glob
@@ -21,10 +25,12 @@ import os
 import re
 import subprocess
 import time
+from io import BytesIO
 
 import pandas as pd
 import requests
 from lxml import html as lxml_html
+from PIL import Image
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -61,7 +67,6 @@ _retry = Retry(total=5, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 
 _session.mount("https://", HTTPAdapter(max_retries=_retry))
 _session.mount("http://", HTTPAdapter(max_retries=_retry))
 
-
 # FUNCTIONS ----------------------------------------------------------------
 def _parse_lxml_table(table_node) -> list[list[str]]:
     """Return a list-of-rows (each row is a list of cell text strings) for an lxml table element."""
@@ -71,29 +76,63 @@ def _parse_lxml_table(table_node) -> list[list[str]]:
         rows.append([c.text_content().strip() for c in cells])
     return rows
 
-
 def _download_image(url: str, images_dir: str) -> str | None:
-    """Download an image to images_dir and return the relative path, or None on failure."""
-    try:
-        # Derive a safe local filename from the URL path
-        url_path = url.split("?")[0]  # strip query strings
-        filename = os.path.basename(url_path) or "image"
-        # Prefix with a hash of the full URL to avoid collisions from same-named files
-        prefix = hashlib.md5(url.encode()).hexdigest()[:8]
-        local_name = f"{prefix}_{filename}"
-        local_path = os.path.join(images_dir, local_name)
+    """
+    Download an image to images_dir and return its relative path.
 
-        if not os.path.exists(local_path):
-            r = _session.get(url, timeout=REQUEST_TIMEOUT)
-            r.raise_for_status()
-            with open(local_path, "wb") as f:
-                f.write(r.content)
+    Some LearnCpp image URLs end in .png even when the server actually returns
+    WebP image data. Since PDF engines such as XeTeX/Tectonic may not support
+    WebP directly, WebP images are converted to real PNG files before being
+    saved.
+    """
+    try:
+        # Remove query parameters before deriving the filename.
+        url_path = url.split("?")[0]
+        original_filename = os.path.basename(url_path) or "image"
+
+        # Prefix filenames with part of the URL hash to avoid collisions
+        # when different URLs use the same image filename.
+        prefix = hashlib.md5(url.encode()).hexdigest()[:8]
+
+        original_local_name = f"{prefix}_{original_filename}"
+        original_local_path = os.path.join(images_dir, original_local_name)
+
+        # WebP images are normalized to PNG, so this is their possible
+        # converted filename.
+        stem = os.path.splitext(original_filename)[0]
+        png_local_name = f"{prefix}_{stem}.png"
+        png_local_path = os.path.join(images_dir, png_local_name)
+
+        # Reuse an image that was already downloaded or converted.
+        if os.path.exists(original_local_path):
+            return f"images/{original_local_name}"
+
+        if os.path.exists(png_local_path):
+            return f"images/{png_local_name}"
+
+        # Download the image.
+        r = _session.get(url, timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+
+        # Inspect the actual image contents instead of trusting the
+        # extension in the URL.
+        with Image.open(BytesIO(r.content)) as image:
+            if image.format == "WEBP":
+                # Convert WebP to a real PNG for PDF compatibility.
+                image.save(png_local_path, "PNG")
+                local_name = png_local_name
+            else:
+                # Preserve the original bytes for already-supported formats.
+                with open(original_local_path, "wb") as f:
+                    f.write(r.content)
+                local_name = original_local_name
 
         return f"images/{local_name}"
+
     except Exception as e:
+        # A failed image should not stop the entire book generation process.
         print(f"  [WARNING] Could not download image {url}: {e}")
         return None
-
 
 def edit_html(file_in: str, file_out: str, images_dir: str) -> None:
     """Extract only the chapter title and body content from a downloaded HTML file.
@@ -263,6 +302,20 @@ cmd = [
     "--metadata", "author=Alex",
     "--metadata", "author=Nascardriver",
     "--metadata", "author=Cosmin James",
-    "-o", OUTPUT_FILE_NAME,
 ]
+
+# PDF-specific options.
+# Tectonic provides the LaTeX engine, while pdf_header.tex ensures that
+# oversized screenshots are scaled to fit within the printable page area.
+if OUTPUT_FORMAT == "pdf":
+    cmd.extend([
+        "--pdf-engine=tectonic",
+        "--include-in-header=pdf_header.tex",
+    ])
+
+cmd.extend([
+    "-o",
+    OUTPUT_FILE_NAME,
+])
+
 subprocess.run(cmd, check=True)
