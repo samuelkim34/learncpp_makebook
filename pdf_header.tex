@@ -28,3 +28,15 @@
 }
 
 \makeatother
+
+% Wrap long lines in syntax-highlighted code blocks instead of allowing
+% them to extend beyond the printable page area.
+\usepackage{fvextra}
+
+\AtBeginDocument{%
+  \RecustomVerbatimEnvironment{Highlighting}{Verbatim}{
+    commandchars=\\\{\},
+    breaklines=true,
+    breakanywhere=true
+  }%
+}

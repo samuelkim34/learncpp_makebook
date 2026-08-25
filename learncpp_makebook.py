@@ -14,9 +14,10 @@
 # Python dependencies:
 #   pip install requests lxml pandas pillow
 #
-# PDF output dependencies:
+# System dependencies:
 #   pandoc
-#   tectonic
+#   PDF output additionally requires a pandoc-supported PDF engine
+#   (for example: tectonic, pdflatex, or xelatex)
 
 import argparse
 import glob
@@ -49,10 +50,17 @@ parser.add_argument(
     "--output", dest="output_file_name", default="learncpp_book.epub",
     help="Output file name (default: learncpp_book.epub)",
 )
+
+parser.add_argument(
+    "--pdf-engine", dest="pdf_engine", default=None,
+    help="Optional PDF engine passed to pandoc (e.g. tectonic, pdflatex, xelatex)",
+)
+
 args = parser.parse_args()
 
 OUTPUT_FORMAT = args.output_format
 OUTPUT_FILE_NAME = args.output_file_name
+PDF_ENGINE = args.pdf_engine
 
 # HTTP session with browser User-Agent and automatic retries
 _session = requests.Session()
@@ -84,6 +92,9 @@ def _download_image(url: str, images_dir: str) -> str | None:
     WebP image data. Since PDF engines such as XeTeX/Tectonic may not support
     WebP directly, WebP images are converted to real PNG files before being
     saved.
+
+    Existing cached images are also checked so files created by older versions
+    of the script can be repaired automatically.
     """
     try:
         # Remove query parameters before deriving the filename.
@@ -93,39 +104,58 @@ def _download_image(url: str, images_dir: str) -> str | None:
         # Prefix filenames with part of the URL hash to avoid collisions
         # when different URLs use the same image filename.
         prefix = hashlib.md5(url.encode()).hexdigest()[:8]
+        local_name = f"{prefix}_{original_filename}"
+        local_path = os.path.join(images_dir, local_name)
 
-        original_local_name = f"{prefix}_{original_filename}"
-        original_local_path = os.path.join(images_dir, original_local_name)
+        # Reuse an existing image when possible.
+        if os.path.exists(local_path):
+            try:
+                with Image.open(local_path) as image:
+                    if image.format == "WEBP":
+                        image.load()
 
-        # WebP images are normalized to PNG, so this is their possible
-        # converted filename.
-        stem = os.path.splitext(original_filename)[0]
-        png_local_name = f"{prefix}_{stem}.png"
-        png_local_path = os.path.join(images_dir, png_local_name)
+                        # Always give converted WebP images a real .png extension.
+                        stem = os.path.splitext(original_filename)[0]
+                        png_local_name = f"{prefix}_{stem}.png"
+                        png_local_path = os.path.join(images_dir, png_local_name)
 
-        # Reuse an image that was already downloaded or converted.
-        if os.path.exists(original_local_path):
-            return f"images/{original_local_name}"
+                        # Write to a temporary file first so the source file is never
+                        # overwritten while Pillow is reading it.
+                        temp_path = png_local_path + ".tmp"
+                        image.save(temp_path, "PNG")
+                        os.replace(temp_path, png_local_path)
 
-        if os.path.exists(png_local_path):
-            return f"images/{png_local_name}"
+                        # Remove the old cached WebP file if the name changed.
+                        if png_local_path != local_path:
+                            os.remove(local_path)
+
+                        return f"images/{png_local_name}"
+
+                # Existing non-WebP image is already usable.
+                return f"images/{local_name}"
+
+            except OSError:
+                # Invalid/incomplete cached file: remove it and download again.
+                os.remove(local_path)
 
         # Download the image.
         r = _session.get(url, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
 
-        # Inspect the actual image contents instead of trusting the
-        # extension in the URL.
+        # Inspect the actual image contents instead of trusting the extension
+        # contained in the URL.
         with Image.open(BytesIO(r.content)) as image:
             if image.format == "WEBP":
                 # Convert WebP to a real PNG for PDF compatibility.
-                image.save(png_local_path, "PNG")
-                local_name = png_local_name
+                stem = os.path.splitext(original_filename)[0]
+                local_name = f"{prefix}_{stem}.png"
+                local_path = os.path.join(images_dir, local_name)
+
+                image.save(local_path, "PNG")
             else:
                 # Preserve the original bytes for already-supported formats.
-                with open(original_local_path, "wb") as f:
+                with open(local_path, "wb") as f:
                     f.write(r.content)
-                local_name = original_local_name
 
         return f"images/{local_name}"
 
@@ -305,13 +335,17 @@ cmd = [
 ]
 
 # PDF-specific options.
-# Tectonic provides the LaTeX engine, while pdf_header.tex ensures that
-# oversized screenshots are scaled to fit within the printable page area.
 if OUTPUT_FORMAT == "pdf":
+    # Use more of the page while keeping comfortable margins.
     cmd.extend([
-        "--pdf-engine=tectonic",
         "--include-in-header=pdf_header.tex",
+        "-V",
+        "geometry:margin=0.75in",
     ])
+
+    # Use pandoc's default PDF engine unless one is explicitly selected.
+    if PDF_ENGINE:
+        cmd.append(f"--pdf-engine={PDF_ENGINE}")
 
 cmd.extend([
     "-o",
